@@ -50,6 +50,30 @@ async function startServer() {
   const USERS_FILE = path.join(__dirname, 'users.json');
   const ROLES_FILE = path.join(__dirname, 'roles.json');
   const NETSIS_CONFIG_FILE = path.join(__dirname, 'netsisConfig.json');
+  const ARCHIVE_DIR = path.join(__dirname, 'archives');
+
+  if (!fs.existsSync(ARCHIVE_DIR)) {
+    fs.mkdirSync(ARCHIVE_DIR);
+  }
+
+  const appendLogToArchive = async (log: any) => {
+    try {
+      const dateTarget = new Date(log.date || Date.now());
+      const year = dateTarget.getFullYear();
+      const month = String(dateTarget.getMonth() + 1).padStart(2, '0');
+      const archiveFile = path.join(ARCHIVE_DIR, `history_${year}_${month}.json`);
+      
+      let archiveData: any[] = [];
+      if (fs.existsSync(archiveFile)) {
+        const fileContent = await fs.promises.readFile(archiveFile, 'utf-8');
+        archiveData = JSON.parse(fileContent);
+      }
+      archiveData.push(log);
+      await safeWriteJson(archiveFile, archiveData);
+    } catch (e) {
+      console.error('Error appending log to archive:', e);
+    }
+  };
 
   let historyLogs: any[] = [];
   try {
@@ -147,6 +171,7 @@ async function startServer() {
                     detay: 'Malzeme kullanım ömrü (Floor Life) doldu ve süresi aşıldı.'
                  };
                  historyLogs.push(log);
+                 await appendLogToArchive(log);
                  if (historyLogs.length > 5000) historyLogs = historyLogs.slice(-5000);
                  await safeWriteJson(HISTORY_FILE, historyLogs);
                  io.emit('history-updated', log);
@@ -173,6 +198,7 @@ async function startServer() {
                     detay: `${p.parcaNo} (${p.type}) ısınma süresi tamamlandı. Hazır durumda.`
                  };
                  historyLogs.push(log);
+                 await appendLogToArchive(log);
                  if (historyLogs.length > 5000) historyLogs = historyLogs.slice(-5000);
                  await safeWriteJson(HISTORY_FILE, historyLogs);
                  io.emit('history-updated', log);
@@ -218,9 +244,10 @@ async function startServer() {
             detay: `${id} sensör verisi kaydedildi.`
           };
           historyLogs.push(log);
+          await appendLogToArchive(log);
           
-          // Limit logs if they grow too much (e.g. keep last 2000 logs)
-          if (historyLogs.length > 2000) historyLogs = historyLogs.slice(-2000);
+          // Limit logs if they grow too much (e.g. keep last 5000 logs)
+          if (historyLogs.length > 5000) historyLogs = historyLogs.slice(-5000);
           
           await safeWriteJson(HISTORY_FILE, historyLogs);
           io.emit('history-updated', log);
@@ -389,6 +416,7 @@ async function startServer() {
       if (!log.date) log.date = new Date().toISOString();
       
       historyLogs.push(log);
+      await appendLogToArchive(log);
       if (historyLogs.length > 5000) {
         historyLogs = historyLogs.slice(-5000);
       }
