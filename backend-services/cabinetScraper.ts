@@ -80,7 +80,6 @@ export async function scrapeCabinetData(targetUrl: string): Promise<{ hum: strin
       await page.waitForSelector('#spnCT', { timeout: 5000 });
     } catch (e) {
       console.warn(`[Proxy-Puppeteer] Selectors not found for ${targetUrl}, using fallback`);
-      isScraping = false;
       return cache[targetUrl];
     }
     
@@ -92,14 +91,14 @@ export async function scrapeCabinetData(targetUrl: string): Promise<{ hum: strin
     
     cache[targetUrl] = data;
     cacheTimestamps[targetUrl] = Date.now();
-    isScraping = false;
     return data;
   } catch (error: any) {
     console.error(`[Proxy-Puppeteer Error] URL: ${targetUrl} Message: ${error.message}`);
     if (error.message.includes('Session closed') || error.message.includes('Target closed') || error.message.includes('browser has disconnected')) {
        browserInstance = null;
     }
-    isScraping = false;
     return cache[targetUrl];
+  } finally {
+    isScraping = false;
   }
 }

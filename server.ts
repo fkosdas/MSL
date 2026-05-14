@@ -11,9 +11,21 @@ import { scrapeCabinetData } from './backend-services/cabinetScraper';
 import { connectToNetsis, fetchNetsisMslData, searchNetsisMslData } from './backend-services/netsisDb';
 import { Malzeme, SolderPaste, CabinetConfig, NetsisConfig, NetsisMalzeme } from './src/types';
 import { mslEngine } from './src/mslEngine';
+import { SOLDER_PASTE_THAW_HOURS } from './src/constants';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const safeWriteJson = async (filePath: string, data: any) => {
+  const tmpPath = filePath + '.tmp';
+  try {
+    const jsonString = JSON.stringify(data, null, 2);
+    await fs.promises.writeFile(tmpPath, jsonString, 'utf-8');
+    await fs.promises.rename(tmpPath, filePath);
+  } catch (error) {
+    console.error(`Error safely writing ${filePath}:`, error);
+  }
+};
 
 async function startServer() {
   const app = express();
@@ -37,6 +49,7 @@ async function startServer() {
   const HISTORY_FILE = path.join(__dirname, 'history.json');
   const USERS_FILE = path.join(__dirname, 'users.json');
   const ROLES_FILE = path.join(__dirname, 'roles.json');
+  const NETSIS_CONFIG_FILE = path.join(__dirname, 'netsisConfig.json');
 
   let historyLogs: any[] = [];
   try {
@@ -105,24 +118,23 @@ async function startServer() {
     console.error('Data parsing error', e);
   }
 
-  const saveTrackingData = () => {
+  const saveTrackingData = async () => {
     try {
       const now = Date.now();
       let updatedCount = 0;
       
       // Update MSL times for OPENED and BAKING items before saving
-      Object.keys(malzemeler).forEach(key => {
+      for (const key of Object.keys(malzemeler)) {
          const m = malzemeler[key];
          if (m.durum === 'OPENED' && m.acilisZamani) {
-             const timeOpen = now - new Date(m.acilisZamani).getTime();
-             m.kullanilanZamanMs = (m.kullanilanZamanMs || 0) + timeOpen;
-             m.acilisZamani = new Date(now).toISOString(); // advance the timestamp
-             updatedCount++;
-             
              // Check expiration
              const sonuc = mslEngine.hesapla(m, now);
              if (sonuc.kalanZamanMs !== null && sonuc.kalanZamanMs <= 0) {
+                 const timeOpen = now - new Date(m.acilisZamani).getTime();
+                 m.kullanilanZamanMs = (m.kullanilanZamanMs || 0) + timeOpen;
+                 m.acilisZamani = null;
                  m.durum = 'EXPIRED';
+                 updatedCount++;
                  
                  const log = {
                     id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
@@ -135,15 +147,40 @@ async function startServer() {
                     detay: 'Malzeme kullanım ömrü (Floor Life) doldu ve süresi aşıldı.'
                  };
                  historyLogs.push(log);
-                 fs.writeFileSync(HISTORY_FILE, JSON.stringify(historyLogs, null, 2));
+                 if (historyLogs.length > 5000) historyLogs = historyLogs.slice(-5000);
+                 await safeWriteJson(HISTORY_FILE, historyLogs);
                  io.emit('history-updated', log);
              }
-         } else if (m.durum === 'BAKING' && m.firinlamaBaslangicZamani) {
-             updatedCount++;
          }
-      });
+      }
 
-      fs.writeFileSync(DATA_FILE, JSON.stringify({ malzemeler, solderPastes }, null, 2));
+      for (const key of Object.keys(solderPastes)) {
+         const p = solderPastes[key];
+         if (p.status === 'WARMING_UP' && p.outOfCoolerTime) {
+             const limitHours = p.type ? SOLDER_PASTE_THAW_HOURS[p.type] : 8;
+             const limitMs = limitHours * 3600000;
+             const elapsed = now - new Date(p.outOfCoolerTime).getTime();
+             if (elapsed >= limitMs) {
+                 p.status = 'READY';
+                 io.emit('solder-paste-updated', p);
+                 
+                 const log = {
+                    id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
+                    date: new Date(now).toISOString(),
+                    barkod: p.barkod,
+                    stokAdi: p.parcaNo || '',
+                    islemTipi: 'Hazır / Isındı',
+                    detay: `${p.parcaNo} (${p.type}) ısınma süresi tamamlandı. Hazır durumda.`
+                 };
+                 historyLogs.push(log);
+                 if (historyLogs.length > 5000) historyLogs = historyLogs.slice(-5000);
+                 await safeWriteJson(HISTORY_FILE, historyLogs);
+                 io.emit('history-updated', log);
+             }
+         }
+      }
+
+      await safeWriteJson(DATA_FILE, { malzemeler, solderPastes });
       
       if (updatedCount > 0) {
          io.emit('periodic-update', { malzemeler: Object.values(malzemeler) });
@@ -185,7 +222,7 @@ async function startServer() {
           // Limit logs if they grow too much (e.g. keep last 2000 logs)
           if (historyLogs.length > 2000) historyLogs = historyLogs.slice(-2000);
           
-          fs.writeFileSync(HISTORY_FILE, JSON.stringify(historyLogs, null, 2));
+          await safeWriteJson(HISTORY_FILE, historyLogs);
           io.emit('history-updated', log);
         } catch (e) {
           console.error(`Periodic sensor logging failed for ${id}:`, e);
@@ -201,13 +238,31 @@ async function startServer() {
   // Initial log on startup after a small delay
   setTimeout(logSensorsPeriodically, 10000);
 
-  let netsisConfig: NetsisConfig | null = {
-    server: 'NETSIS\\SQLNTS',
-    port: 1433,
-    database: 'EMS',
-    username: 'MSL',
-    password: 'msl1234*',
-  };
+  let netsisConfig: NetsisConfig | null = null;
+  try {
+    if (fs.existsSync(NETSIS_CONFIG_FILE)) {
+      netsisConfig = JSON.parse(fs.readFileSync(NETSIS_CONFIG_FILE, 'utf-8'));
+    } else {
+      netsisConfig = {
+        server: 'NETSIS\\SQLNTS',
+        port: 1433,
+        database: 'EMS',
+        username: 'MSL',
+        password: 'msl1234*',
+      };
+      fs.writeFileSync(NETSIS_CONFIG_FILE, JSON.stringify(netsisConfig, null, 2));
+    }
+  } catch (e) {
+    console.error('Netsis config parsing error', e);
+    netsisConfig = {
+      server: 'NETSIS\\SQLNTS',
+      port: 1433,
+      database: 'EMS',
+      username: 'MSL',
+      password: 'msl1234*',
+    };
+  }
+
   let netsisCache: NetsisMalzeme[] = [];
 
   // --- Netsis Helper ---
@@ -325,7 +380,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/history', (req, res) => {
+  app.post('/api/history', async (req, res) => {
     try {
       const log = req.body;
       if (!log || !log.barkod) return res.status(400).json({ error: 'Invalid log' });
@@ -334,7 +389,10 @@ async function startServer() {
       if (!log.date) log.date = new Date().toISOString();
       
       historyLogs.push(log);
-      fs.writeFileSync(HISTORY_FILE, JSON.stringify(historyLogs, null, 2));
+      if (historyLogs.length > 5000) {
+        historyLogs = historyLogs.slice(-5000);
+      }
+      await safeWriteJson(HISTORY_FILE, historyLogs);
       io.emit('history-updated', log);
       res.json({ success: true, log });
     } catch (err) {
@@ -403,37 +461,37 @@ async function startServer() {
       roles
     });
 
-    socket.on('update-user', (user: any) => {
+    socket.on('update-user', async (user: any) => {
       const idx = users.findIndex(u => u.id === user.id);
       if (idx !== -1) {
         users[idx] = user;
       } else {
         users.push(user);
       }
-      try { fs.writeFileSync(USERS_FILE, JSON.stringify(users)); } catch (e) {}
+      await safeWriteJson(USERS_FILE, users);
       io.emit('users-updated', users);
     });
 
-    socket.on('delete-user', (userId: string) => {
+    socket.on('delete-user', async (userId: string) => {
       users = users.filter(u => u.id !== userId);
-      try { fs.writeFileSync(USERS_FILE, JSON.stringify(users)); } catch (e) {}
+      await safeWriteJson(USERS_FILE, users);
       io.emit('users-updated', users);
     });
 
-    socket.on('update-role', (role: any) => {
+    socket.on('update-role', async (role: any) => {
       const idx = roles.findIndex(r => r.id === role.id);
       if (idx !== -1) {
         roles[idx] = role;
       } else {
         roles.push(role);
       }
-      try { fs.writeFileSync(ROLES_FILE, JSON.stringify(roles)); } catch (e) {}
+      await safeWriteJson(ROLES_FILE, roles);
       io.emit('roles-updated', roles);
     });
 
-    socket.on('delete-role', (roleId: string) => {
+    socket.on('delete-role', async (roleId: string) => {
       roles = roles.filter(r => r.id !== roleId);
-      try { fs.writeFileSync(ROLES_FILE, JSON.stringify(roles)); } catch (e) {}
+      await safeWriteJson(ROLES_FILE, roles);
       io.emit('roles-updated', roles);
     });
 
@@ -461,14 +519,15 @@ async function startServer() {
       io.emit('solder-paste-deleted', barkod);
     });
 
-    socket.on('update-cabinet-configs', (configs: CabinetConfig[]) => {
+    socket.on('update-cabinet-configs', async (configs: CabinetConfig[]) => {
       cabinetConfigs = configs;
-      try { fs.writeFileSync(CONFIG_FILE, JSON.stringify(cabinetConfigs)); } catch (e) {}
+      await safeWriteJson(CONFIG_FILE, cabinetConfigs);
       io.emit('cabinet-configs-updated', configs);
     });
 
     socket.on('update-netsis-config', async (config: NetsisConfig) => {
       netsisConfig = config;
+      await safeWriteJson(NETSIS_CONFIG_FILE, netsisConfig);
       try {
         await connectToNetsis(config);
         await refreshNetsisCache();
