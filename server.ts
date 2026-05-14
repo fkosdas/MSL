@@ -16,7 +16,15 @@ import { SOLDER_PASTE_THAW_HOURS } from './src/constants';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+let isWriting: Record<string, boolean> = {};
+
 const safeWriteJson = async (filePath: string, data: any) => {
+  // Eğer bu dosyaya şu an başka bir işlem yazıyorsa, bitene kadar 100ms aralıklarla bekle
+  while (isWriting[filePath]) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+
+  isWriting[filePath] = true;
   const tmpPath = filePath + '.tmp';
   try {
     const jsonString = JSON.stringify(data, null, 2);
@@ -24,6 +32,8 @@ const safeWriteJson = async (filePath: string, data: any) => {
     await fs.promises.rename(tmpPath, filePath);
   } catch (error) {
     console.error(`Error safely writing ${filePath}:`, error);
+  } finally {
+    isWriting[filePath] = false; // İşlem bitince kilidi kaldır
   }
 };
 

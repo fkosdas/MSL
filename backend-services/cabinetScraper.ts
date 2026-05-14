@@ -100,14 +100,12 @@ export async function scrapeCabinetData(targetUrl: string): Promise<{ hum: strin
        browserInstance = null;
     }
     
-    // Fallback Mock Data so the application UI charting continues to work in development environments:
-    const mockTemp = (23 + Math.random() * 2).toFixed(1);
-    const mockHum = (10 + Math.random() * 5).toFixed(1);
-    const mockData = { temp: mockTemp, hum: mockHum };
+    // Return error flag so the UI can detect disconnection
+    const errorData = { temp: '-99', hum: '-99' };
     
-    cache[targetUrl] = mockData;
+    cache[targetUrl] = errorData;
     cacheTimestamps[targetUrl] = Date.now();
-    return mockData;
+    return errorData;
   } finally {
     isScraping = false;
   }
