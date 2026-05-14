@@ -1,15 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { User, Role } from '../types';
 import { dataService } from '../dataService';
-import { Shield, Users, Key, Plus, Trash2, Edit2, Save, X } from 'lucide-react';
+import { Shield, Users, Key, Plus, Trash2, Edit2, Save, X, Calendar, PackageOpen, XCircle, CheckCircle2 } from 'lucide-react';
 
 export function AdminPanel() {
-  const [activeSubTab, setActiveSubTab] = useState<'USERS' | 'ROLES'>('USERS');
+  const [activeSubTab, setActiveSubTab] = useState<'USERS' | 'ROLES' | 'DAILY_SUMMARY'>('USERS');
   const [users, setUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
 
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [editingRole, setEditingRole] = useState<Role | null>(null);
+
+  const [dailySummary, setDailySummary] = useState<{openedCount: number, expiredCount: number, readyPasteCount: number} | null>(null);
+  const [isLoadingSummary, setIsLoadingSummary] = useState(false);
 
   useEffect(() => {
     const fetchAuthData = () => {
@@ -20,6 +23,22 @@ export function AdminPanel() {
     const unsubscribe = dataService.subscribe(fetchAuthData);
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    if (activeSubTab === 'DAILY_SUMMARY') {
+      setIsLoadingSummary(true);
+      fetch('/api/reports/daily-summary')
+        .then(res => res.json())
+        .then(data => {
+          setDailySummary(data);
+          setIsLoadingSummary(false);
+        })
+        .catch(err => {
+          console.error('Failed to fetch daily summary', err);
+          setIsLoadingSummary(false);
+        });
+    }
+  }, [activeSubTab]);
 
   const handleSaveUser = (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,6 +82,9 @@ export function AdminPanel() {
          </button>
          <button onClick={() => setActiveSubTab('ROLES')} className={`px-4 py-2 font-bold text-xs tracking-wider rounded-lg border ${activeSubTab === 'ROLES' ? 'bg-blue-600 border-blue-500' : 'border-border text-muted-foreground'}`}>
             ROLLER VE YETKİLER
+         </button>
+         <button onClick={() => setActiveSubTab('DAILY_SUMMARY')} className={`px-4 py-2 font-bold text-xs tracking-wider rounded-lg border flex items-center gap-2 ${activeSubTab === 'DAILY_SUMMARY' ? 'bg-blue-600 border-blue-500' : 'border-border text-muted-foreground'}`}>
+            <Calendar size={14} /> GÜNLÜK VARDİYA ÖZETİ
          </button>
       </div>
 
@@ -126,6 +148,48 @@ export function AdminPanel() {
                     </div>
                  ))}
               </div>
+           </div>
+        )}
+
+        {activeSubTab === 'DAILY_SUMMARY' && (
+           <div className="space-y-6">
+              <div className="flex justify-between items-center">
+                 <h2 className="text-xl font-bold flex items-center gap-2"><Calendar className="text-blue-400"/> Günlük Vardiya Özeti (00:01 - 23:59)</h2>
+              </div>
+              
+              {isLoadingSummary ? (
+                <div className="flex justify-center p-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                </div>
+              ) : dailySummary ? (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="bg-card border border-border p-6 rounded-2xl flex flex-col items-center justify-center text-center gap-3">
+                    <div className="w-12 h-12 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center">
+                       <PackageOpen size={24} />
+                    </div>
+                    <div className="text-4xl font-black">{dailySummary.openedCount}</div>
+                    <div className="text-sm font-bold text-muted-foreground uppercase tracking-widest">Açılan Ürün Sayısı</div>
+                  </div>
+                  
+                  <div className="bg-card border border-border p-6 rounded-2xl flex flex-col items-center justify-center text-center gap-3">
+                    <div className="w-12 h-12 rounded-full bg-red-500/20 text-red-500 flex items-center justify-center">
+                       <XCircle size={24} />
+                    </div>
+                    <div className="text-4xl font-black">{dailySummary.expiredCount}</div>
+                    <div className="text-sm font-bold text-muted-foreground uppercase tracking-widest">Süresi Aşılan Ürün Sayısı</div>
+                  </div>
+                  
+                  <div className="bg-card border border-border p-6 rounded-2xl flex flex-col items-center justify-center text-center gap-3">
+                    <div className="w-12 h-12 rounded-full bg-green-500/20 text-green-400 flex items-center justify-center">
+                       <CheckCircle2 size={24} />
+                    </div>
+                    <div className="text-4xl font-black">{dailySummary.readyPasteCount}</div>
+                    <div className="text-sm font-bold text-muted-foreground uppercase tracking-widest">Kullanıma Hazır Krem Lehim</div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center p-8 text-muted-foreground">Veri yüklenemedi.</div>
+              )}
            </div>
         )}
       </div>

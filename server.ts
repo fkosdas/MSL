@@ -245,12 +245,25 @@ async function startServer() {
             stokAdi: id === 'OVEN_1' ? 'Kürleme Fırını' : (id === 'DRY_CABINET_1' ? 'Lehim Dolabı' : 'Nem Dolabı'),
             islemTipi: 'SENSÖR_GÜNCELLEME',
             yeniDeger: id,
-            temp: data.temp || 0,
-            hum: data.hum || 0,
+            temp: data.temp ? parseFloat(data.temp as string) : 0,
+            hum: data.hum ? parseFloat(data.hum as string) : 0,
             detay: `${id} sensör verisi kaydedildi.`
           };
+          
+          // 1. Grafiklerin beslenebilmesi için bellekteki ana diziye ekliyoruz
+          historyLogs.push(log);
+          if (historyLogs.length > 5000) {
+            historyLogs = historyLogs.slice(-5000);
+          }
+          
+          // 2. Kalıcılık (persistence) için doğrudan aylık NDJSON arşivine yazıyoruz
           await appendLogToArchive(log);
+          
+          // 3. Arayüzdeki grafiklerin anlık güncellenmesi için socket yayını yapıyoruz
           io.emit('history-updated', log);
+
+          // NOT: Diski her 5 dakikada bir 5000 satır yazarak yormamak için 
+          // safeWriteJson(HISTORY_FILE, historyLogs) işlemini BURADA ÇAĞIRMIYORUZ.
         } catch (e) {
           console.error(`Periodic sensor logging failed for ${id}:`, e);
         }
@@ -456,6 +469,50 @@ async function startServer() {
     } catch (error: any) {
       console.error('[Proxy] Error scraping cabinet data:', error.message);
       res.json({ temp: '0', hum: '0' });
+    }
+  });
+
+  app.get('/api/reports/daily-summary', async (req, res) => {
+    try {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const archiveFile = path.join(ARCHIVE_DIR, `history_${year}_${month}.ndjson`);
+      
+      let openedCount = 0;
+      let expiredCount = 0;
+      let readyPasteCount = 0;
+
+      // Bugünün başlangıç ve bitiş zaman damgaları (00:01:00 - 23:59:59)
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 1, 0).getTime();
+      const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59).getTime();
+
+      if (fs.existsSync(archiveFile)) {
+        const fileContent = await fs.promises.readFile(archiveFile, 'utf-8');
+        const lines = fileContent.split('\n').filter(line => line.trim());
+        
+        for (const line of lines) {
+          try {
+            const log = JSON.parse(line);
+            const logTime = new Date(log.date).getTime();
+            
+            if (logTime >= startOfDay && logTime <= endOfDay) {
+              if (log.islemTipi?.includes('Açık') || log.islemTipi?.includes('Dolaptan Çıkarma') || log.islemTipi?.includes('Fırından Çıkarma')) {
+                openedCount++;
+              }
+              if (log.islemTipi?.includes('Süre Aşımı') || log.yeniDeger === 'EXPIRED') {
+                expiredCount++;
+              }
+              if (log.islemTipi?.includes('Hazır / Isındı')) {
+                readyPasteCount++;
+              }
+            }
+          } catch (e) {}
+        }
+      }
+      res.json({ openedCount, expiredCount, readyPasteCount });
+    } catch (err) {
+      res.status(500).json({ error: 'Raporlama hatası' });
     }
   });
 

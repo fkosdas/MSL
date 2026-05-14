@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Settings, RefreshCw, Box, Layers, History, LayoutDashboard, LayoutGrid, Thermometer, Package, Factory, Shield, LogOut, PanelRight } from 'lucide-react';
+import { Settings, RefreshCw, Box, Layers, History, LayoutDashboard, LayoutGrid, Thermometer, Package, Factory, Shield, LogOut, PanelRight, AlertTriangle, Activity } from 'lucide-react';
 import { dataService } from './dataService';
 import { Malzeme, CabinetId, AppTab, ConnectionStatus, User, Role } from './types';
 import { TrackingTable } from './components/TrackingTable';
@@ -40,6 +40,39 @@ export default function App() {
     } else {
       document.body.classList.add('dark-mode'); // Default
     }
+
+    // Otomatik oturum kontrolü
+    const savedToken = localStorage.getItem('app-auth-token');
+    if (savedToken) {
+      // Kullanıcı listesi yüklendiğinde eşleştirme yapabilmek için kısa bir gecikme
+      setTimeout(() => {
+        const users = dataService.getUsers();
+        const foundUser = users.find(u => u.qrCode === savedToken);
+        if (foundUser) {
+          setCurrentUser(foundUser);
+          dataService.setCurrentUser(foundUser);
+          const roles = dataService.getRoles();
+          const role = roles.find(r => r.id === foundUser.roleId);
+          setUserRole(role || null);
+          // Arka planda sunucu socket kimliğini tekrar kaydettir
+          dataService.getSocket().emit('login', { token: savedToken });
+        }
+      }, 500);
+    }
+  }, []);
+
+  useEffect(() => {
+    const socket = dataService.getSocket();
+    const handleReconnect = () => {
+      const token = localStorage.getItem('app-auth-token');
+      if (token) {
+        socket.emit('login', { token });
+      }
+    };
+    socket.on('connect', handleReconnect);
+    return () => {
+      socket.off('connect', handleReconnect);
+    };
   }, []);
 
   const toggleTheme = () => {
@@ -286,6 +319,13 @@ export default function App() {
     return results;
   }, [malzemeler, netsisData, searchFilter, locationFilter, connStatus.lastChecked, simulatedNow]);
 
+  const criticalItems = useMemo(() => {
+    return filteredMalzemeler.filter(m => {
+      if (m.state !== 'OPENED') return false;
+      const res = mslEngine.hesapla(m, simulatedNow);
+      return res.kalanZamanMs > 0 && res.kalanZamanMs <= 3600000; // 1 hour threshold
+    });
+  }, [filteredMalzemeler, simulatedNow]);
 
   const handleLogHistory = (logData: any) => {
     const loc = logData.yeniDeger || logData.eskiDeger;
@@ -344,14 +384,17 @@ export default function App() {
   };
 
   const handleLogin = (user: User) => {
+    localStorage.setItem('app-auth-token', user.qrCode);
     setCurrentUser(user);
     dataService.setCurrentUser(user);
     const roles = dataService.getRoles();
     const role = roles.find(r => r.id === user.roleId);
     setUserRole(role || null);
+    dataService.getSocket().emit('login', { token: user.qrCode });
   };
 
   const handleLogout = () => {
+    localStorage.removeItem('app-auth-token');
     setCurrentUser(null);
     dataService.setCurrentUser(null);
     setUserRole(null);
@@ -434,15 +477,28 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-6">
-          <div className="flex flex-col items-end">
-            <div className="flex items-center gap-2">
-              <div className={`w-1.5 h-1.5 rounded-full ${connStatus.connected ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)] animate-pulse'}`}></div>
-              <span className={`text-[9px] font-bold uppercase tracking-widest ${connStatus.connected ? 'text-muted-foreground' : 'text-red-400'}`}>
-                {connStatus.connected ? 'Netsis Bağlı' : 'Netsis Hatası'}
-              </span>
+          <div className="flex flex-col items-end gap-1">
+            <div className={`flex items-center gap-2 px-2.5 py-1 rounded-full border shadow-sm ${connStatus.connected ? 'bg-green-500/10 border-green-500/20 text-green-500' : 'bg-red-500/10 border-red-500/20 text-red-500'}`}>
+              {connStatus.connected ? (
+                <>
+                  <Activity size={12} className="animate-pulse drop-shadow-[0_0_5px_rgba(34,197,94,0.8)]" />
+                  <span className="text-[9px] font-bold uppercase tracking-widest">
+                    ERP Senkronizasyonu Aktif
+                  </span>
+                </>
+              ) : (
+                <>
+                  <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping ring-2 ring-red-500/30"></div>
+                  <span className="text-[9px] font-bold uppercase tracking-widest">
+                    ERP Bağlantısı Kesildi - Yerel Mod
+                  </span>
+                </>
+              )}
             </div>
             {connStatus.lastChecked && (
-              <span className="text-[8px] font-mono text-dim-foreground">Senk: {new Date(connStatus.lastChecked).toLocaleTimeString()}</span>
+              <div className="bg-card/50 border border-border px-2 py-0.5 rounded shadow-sm">
+                <span className="text-[8.5px] font-mono font-medium text-muted-foreground uppercase tracking-wider">Son Nabız: {new Date(connStatus.lastChecked).toLocaleTimeString('tr-TR', { hour12: false })}</span>
+              </div>
             )}
           </div>
           
@@ -498,6 +554,37 @@ export default function App() {
       <main className="flex-1 overflow-hidden p-8 flex gap-6">
         {/* Left Area (Tabs + Content) */}
         <div className="flex-1 flex flex-col min-w-0 flex-shrink gap-6">
+          {/* Erken Uyarı Paneli */}
+          {criticalItems.length > 0 && activeTab === 'MSL' && (
+            <div className="shrink-0 p-4 bg-yellow-500/10 border border-yellow-500/50 rounded-2xl flex items-start gap-4">
+              <div className="bg-yellow-500/20 p-2 rounded-full text-yellow-500 animate-pulse">
+                <AlertTriangle size={24} />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-yellow-500 font-bold text-lg mb-1 tracking-tight">
+                  DİKKAT: Aşağıdaki malzemelerin zemin ömrünün dolmasına 1 saatten az kaldı!
+                </h3>
+                <p className="text-muted-foreground text-sm mb-3">Lütfen bu malzemeleri acilen dolaba kaldırın veya fırınlama işlemini başlatın.</p>
+                <div className="flex flex-wrap gap-2">
+                  {criticalItems.map(m => {
+                    const res = mslEngine.hesapla(m, simulatedNow);
+                    const minutes = Math.floor(res.kalanZamanMs / 60000);
+                    return (
+                      <button
+                        key={m.id}
+                        onClick={() => setSearchFilter(m.barkod)}
+                        className="flex items-center gap-2 bg-background border border-yellow-500/30 hover:bg-yellow-500/10 hover:border-yellow-500 px-3 py-1.5 rounded-lg text-sm transition-colors"
+                      >
+                        <span className="font-bold text-foreground">{m.parcaNo || m.barkod}</span>
+                        <span className="text-yellow-500 font-medium bg-yellow-500/10 px-2 py-0.5 rounded-md">{minutes}dk kaldı</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center justify-between">
             <div className="flex gap-2">
               {[

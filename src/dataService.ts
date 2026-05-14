@@ -155,4 +155,5 @@ export const dataService = {
   deleteUser: (userId: string) => socket.emit('delete-user', userId),
   updateRole: (role: Role) => socket.emit('update-role', role),
   deleteRole: (roleId: string) => socket.emit('delete-role', roleId),
+  getSocket: () => socket,
 };
