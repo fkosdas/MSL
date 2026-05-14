@@ -249,13 +249,7 @@ async function startServer() {
             hum: data.hum || 0,
             detay: `${id} sensör verisi kaydedildi.`
           };
-          historyLogs.push(log);
           await appendLogToArchive(log);
-          
-          // Limit logs if they grow too much (e.g. keep last 5000 logs)
-          if (historyLogs.length > 5000) historyLogs = historyLogs.slice(-5000);
-          
-          await safeWriteJson(HISTORY_FILE, historyLogs);
           io.emit('history-updated', log);
         } catch (e) {
           console.error(`Periodic sensor logging failed for ${id}:`, e);
@@ -272,29 +266,30 @@ async function startServer() {
   setTimeout(logSensorsPeriodically, 10000);
 
   let netsisConfig: NetsisConfig | null = null;
+  let fallbackConfig: NetsisConfig = {
+    server: 'NETSIS\\SQLNTS',
+    port: 1433,
+    database: 'EMS',
+    username: 'MSL',
+    password: '',
+  };
+
   try {
     if (fs.existsSync(NETSIS_CONFIG_FILE)) {
-      netsisConfig = JSON.parse(fs.readFileSync(NETSIS_CONFIG_FILE, 'utf-8'));
-    } else {
-      netsisConfig = {
-        server: 'NETSIS\\SQLNTS',
-        port: 1433,
-        database: 'EMS',
-        username: 'MSL',
-        password: 'msl1234*',
-      };
-      fs.writeFileSync(NETSIS_CONFIG_FILE, JSON.stringify(netsisConfig, null, 2));
+      const fileConfig = JSON.parse(fs.readFileSync(NETSIS_CONFIG_FILE, 'utf-8'));
+      fallbackConfig = { ...fallbackConfig, ...fileConfig };
     }
   } catch (e) {
     console.error('Netsis config parsing error', e);
-    netsisConfig = {
-      server: 'NETSIS\\SQLNTS',
-      port: 1433,
-      database: 'EMS',
-      username: 'MSL',
-      password: 'msl1234*',
-    };
   }
+
+  netsisConfig = {
+    server: process.env.NETSIS_SERVER || fallbackConfig.server,
+    port: process.env.NETSIS_PORT ? parseInt(process.env.NETSIS_PORT, 10) : fallbackConfig.port,
+    database: process.env.NETSIS_DATABASE || fallbackConfig.database,
+    username: process.env.NETSIS_USERNAME || fallbackConfig.username,
+    password: process.env.NETSIS_PASSWORD || fallbackConfig.password || '',
+  };
 
   let netsisCache: NetsisMalzeme[] = [];
 
@@ -495,6 +490,20 @@ async function startServer() {
   });
 
   // --- Socket.io Logic ---
+  const connectedUsers = new Map<string, any>();
+
+  const checkPermission = (socketId: string, requiredPerms: string[]) => {
+    const user = connectedUsers.get(socketId);
+    // If there are no users defined yet, allow all until one is set? 
+    // The requirement didn't specify fallback, let's strictly require the user.
+    if (!user) return false;
+    const role = roles.find(r => r.id === user.roleId);
+    if (!role) return false;
+    const userPerms = role.permissions || [];
+    if (userPerms.includes('ALL')) return true;
+    return requiredPerms.some(p => userPerms.includes(p));
+  };
+
   io.on('connection', (socket) => {
     socket.emit('initial-state', {
       malzemeler: Object.values(malzemeler),
@@ -508,7 +517,23 @@ async function startServer() {
       roles
     });
 
+    socket.on('login', (data: { token: string }) => {
+      if (data && data.token) {
+        const user = users.find((u: any) => u.qrCode === data.token);
+        if (user) {
+          connectedUsers.set(socket.id, user);
+        } else {
+          connectedUsers.delete(socket.id);
+        }
+      } else {
+        connectedUsers.delete(socket.id);
+      }
+    });
+
     socket.on('update-user', async (user: any) => {
+      if (!checkPermission(socket.id, ['MANAGE_USERS'])) {
+        return socket.emit('permission-error', 'Yetkisiz işlem');
+      }
       const idx = users.findIndex(u => u.id === user.id);
       if (idx !== -1) {
         users[idx] = user;
@@ -520,12 +545,18 @@ async function startServer() {
     });
 
     socket.on('delete-user', async (userId: string) => {
+      if (!checkPermission(socket.id, ['MANAGE_USERS'])) {
+        return socket.emit('permission-error', 'Yetkisiz işlem');
+      }
       users = users.filter(u => u.id !== userId);
       await safeWriteJson(USERS_FILE, users);
       io.emit('users-updated', users);
     });
 
     socket.on('update-role', async (role: any) => {
+      if (!checkPermission(socket.id, [])) { // requires ALL, so empty array works since checkPermission checks 'ALL'
+        return socket.emit('permission-error', 'Yetkisiz işlem');
+      }
       const idx = roles.findIndex(r => r.id === role.id);
       if (idx !== -1) {
         roles[idx] = role;
@@ -537,38 +568,59 @@ async function startServer() {
     });
 
     socket.on('delete-role', async (roleId: string) => {
+      if (!checkPermission(socket.id, [])) {
+        return socket.emit('permission-error', 'Yetkisiz işlem');
+      }
       roles = roles.filter(r => r.id !== roleId);
       await safeWriteJson(ROLES_FILE, roles);
       io.emit('roles-updated', roles);
     });
 
     socket.on('update-malzeme', (updated: Malzeme) => {
+      if (!checkPermission(socket.id, ['EDIT_MSL'])) {
+        return socket.emit('permission-error', 'Yetkisiz işlem');
+      }
       malzemeler[updated.barkod] = updated;
       io.emit('malzeme-updated', updated);
     });
 
     socket.on('delete-malzeme', (barkod: string) => {
+      if (!checkPermission(socket.id, ['EDIT_MSL'])) {
+        return socket.emit('permission-error', 'Yetkisiz işlem');
+      }
       delete malzemeler[barkod];
       io.emit('malzeme-deleted', barkod);
     });
 
     socket.on('update-solder-paste', (updated: SolderPaste) => {
+      if (!checkPermission(socket.id, ['EDIT_MSL'])) {
+        return socket.emit('permission-error', 'Yetkisiz işlem');
+      }
       solderPastes[updated.barkod] = updated;
       io.emit('solder-paste-updated', updated);
     });
 
     socket.on('delete-solder-paste', (barkod: string) => {
+      if (!checkPermission(socket.id, ['EDIT_MSL'])) {
+        return socket.emit('permission-error', 'Yetkisiz işlem');
+      }
       delete solderPastes[barkod];
       io.emit('solder-paste-deleted', barkod);
     });
 
     socket.on('update-cabinet-configs', async (configs: CabinetConfig[]) => {
+      if (!checkPermission(socket.id, ['EDIT_CABINETS'])) {
+        return socket.emit('permission-error', 'Yetkisiz işlem');
+      }
       cabinetConfigs = configs;
       await safeWriteJson(CONFIG_FILE, cabinetConfigs);
       io.emit('cabinet-configs-updated', configs);
     });
 
     socket.on('update-netsis-config', async (config: NetsisConfig) => {
+      if (!checkPermission(socket.id, ['MANAGE_SETTINGS'])) {
+        return socket.emit('permission-error', 'Yetkisiz işlem');
+      }
       netsisConfig = config;
       await safeWriteJson(NETSIS_CONFIG_FILE, netsisConfig);
       try {
@@ -580,7 +632,9 @@ async function startServer() {
       }
     });
 
-    socket.on('disconnect', () => {});
+    socket.on('disconnect', () => {
+      connectedUsers.delete(socket.id);
+    });
   });
 
   setInterval(refreshNetsisCache, 10 * 60 * 1000);

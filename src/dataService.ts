@@ -142,7 +142,14 @@ export const dataService = {
   // User and Role methods
   getUsers: () => localUsers,
   getRoles: () => localRoles,
-  setCurrentUser: (user: User | null) => { currentUser = user; },
+  setCurrentUser: (user: User | null) => { 
+    currentUser = user; 
+    if (user) {
+      socket.emit('login', { token: user.qrCode });
+    } else {
+      socket.emit('login', { token: '' });
+    }
+  },
   getCurrentUser: () => currentUser,
   updateUser: (user: User) => socket.emit('update-user', user),
   deleteUser: (userId: string) => socket.emit('delete-user', userId),

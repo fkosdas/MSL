@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Settings, RefreshCw, Box, Layers, History, LayoutDashboard, LayoutGrid, Thermometer, Package, Factory, Shield, LogOut, PanelRight } from 'lucide-react';
 import { dataService } from './dataService';
 import { Malzeme, CabinetId, AppTab, ConnectionStatus, User, Role } from './types';
@@ -21,6 +21,8 @@ export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [userRole, setUserRole] = useState<Role | null>(null);
+  const [showInactivityWarning, setShowInactivityWarning] = useState(false);
+  const lastActivityRef = useRef<number>(Date.now());
 
   const [activeTab, setActiveTab] = useState<AppTab>('MSL');
   const [malzemeler, setMalzemeler] = useState<Malzeme[]>([]);
@@ -355,15 +357,67 @@ export default function App() {
     setUserRole(null);
   };
 
-  if (!currentUser) {
-    return <LoginScreen onLogin={handleLogin} />;
-  }
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const handleActivity = () => {
+      lastActivityRef.current = Date.now();
+      setShowInactivityWarning(false);
+    };
+
+    window.addEventListener('mousemove', handleActivity);
+    window.addEventListener('click', handleActivity);
+    window.addEventListener('keydown', handleActivity);
+
+    const checkInterval = setInterval(() => {
+      const inactiveTime = Date.now() - lastActivityRef.current;
+      const TIMEOUT_MS = 30 * 60 * 1000;
+      const WARNING_MS = 28 * 60 * 1000;
+
+      if (inactiveTime >= TIMEOUT_MS) {
+        handleLogout();
+        setShowInactivityWarning(false);
+      } else if (inactiveTime >= WARNING_MS) {
+        setShowInactivityWarning(true);
+      }
+    }, 60000);
+
+    return () => {
+      window.removeEventListener('mousemove', handleActivity);
+      window.removeEventListener('click', handleActivity);
+      window.removeEventListener('keydown', handleActivity);
+      clearInterval(checkInterval);
+    };
+  }, [currentUser]);
 
   const hasAdminPerm = userRole?.permissions.includes('ALL') || userRole?.permissions.includes('MANAGE_USERS');
   const hasSettingsPerm = userRole?.permissions.includes('ALL') || userRole?.permissions.includes('MANAGE_SETTINGS');
   const hasHistoryPerm = userRole?.permissions.includes('ALL') || userRole?.permissions.includes('VIEW_HISTORY');
   const hasCabinetsPerm = userRole?.permissions.includes('ALL') || userRole?.permissions.includes('VIEW_CABINETS') || userRole?.permissions.includes('EDIT_CABINETS');
   const hasMslPerm = userRole?.permissions.includes('ALL') || userRole?.permissions.includes('VIEW_MSL') || userRole?.permissions.includes('EDIT_MSL');
+
+  useEffect(() => {
+    const tabs = [
+      { id: 'MSL', perm: hasMslPerm },
+      { id: 'SOLDER_PASTE', perm: hasMslPerm },
+      { id: 'CABINETS', perm: hasCabinetsPerm },
+      { id: 'HISTORY', perm: hasHistoryPerm },
+      { id: 'SETTINGS', perm: hasSettingsPerm },
+      { id: 'ADMIN', perm: hasAdminPerm }
+    ];
+
+    const currentTabInfo = tabs.find(t => t.id === activeTab);
+    if (currentTabInfo && !currentTabInfo.perm) {
+      const firstAvailable = tabs.find(t => t.perm);
+      if (firstAvailable) {
+        setActiveTab(firstAvailable.id as AppTab);
+      }
+    }
+  }, [activeTab, hasAdminPerm, hasSettingsPerm, hasHistoryPerm, hasCabinetsPerm, hasMslPerm]);
+
+  if (!currentUser) {
+    return <LoginScreen onLogin={handleLogin} />;
+  }
 
   return (
     <div className="h-screen bg-background text-foreground flex flex-col font-sans overflow-hidden">
@@ -490,7 +544,7 @@ export default function App() {
                 transition={{ duration: 0.2 }}
                 className="h-full"
               >
-                {activeTab === 'MSL' && (
+                {activeTab === 'MSL' && hasMslPerm && (
                     <TrackingTable 
                       data={filteredMalzemeler} 
                       onEdit={handleEdit}
@@ -502,19 +556,19 @@ export default function App() {
                       hasMore={netsisData.length < netsisTotal}
                     />
                 )}
-                {activeTab === 'CABINETS' && (
+                {activeTab === 'CABINETS' && hasCabinetsPerm && (
                   <CabinetView malzemeler={filteredMalzemeler} />
                 )}
-                {activeTab === 'SETTINGS' && (
+                {activeTab === 'SETTINGS' && hasSettingsPerm && (
                   <SettingsPanel />
                 )}
-                {activeTab === 'SOLDER_PASTE' && (
+                {activeTab === 'SOLDER_PASTE' && hasMslPerm && (
                   <SolderPasteView netsisData={solderPasteNetsisData} onLog={handleLogHistory} />
                 )}
-                {activeTab === 'HISTORY' && (
+                {activeTab === 'HISTORY' && hasHistoryPerm && (
                   <HistoryPanel />
                 )}
-                {activeTab === 'ADMIN' && (
+                {activeTab === 'ADMIN' && hasAdminPerm && (
                   <AdminPanel />
                 )}
               </motion.div>
@@ -741,6 +795,21 @@ export default function App() {
           }}
           onCancel={() => setCancellingMalzeme(null)}
         />
+      )}
+
+      {showInactivityWarning && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 backdrop-blur-sm">
+          <div className="bg-card border border-border shadow-2xl rounded-2xl p-6 max-w-sm w-full mx-4 text-center">
+            <h2 className="text-xl font-bold mb-2">Oturum Süresi Doluyor</h2>
+            <p className="text-muted-foreground mb-6">İşlem yapılmadığı için, oturum 2 dakika sonra kapatılacaktır.</p>
+            <button
+              onClick={() => setShowInactivityWarning(false)}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl transition-colors"
+            >
+              Oturuma Devam Et
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
