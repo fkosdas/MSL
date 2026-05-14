@@ -26,7 +26,6 @@ export const createCabinetService = (socket: Socket, state: { cabinetConfigs: Ca
       const results: Record<string, { temp: number, hum: number }> = {};
       const cleanVal = (val: string | undefined) => {
         if (!val || val === 'N/A') return 0;
-        if (val === '-99') return -99;
         const num = parseFloat(val.replace(/[^0-9.-]/g, ''));
         return isNaN(num) ? 0 : num;
       };

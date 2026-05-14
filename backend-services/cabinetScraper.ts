@@ -101,7 +101,7 @@ export async function scrapeCabinetData(targetUrl: string): Promise<{ hum: strin
     }
     
     // Return error flag so the UI can detect disconnection
-    const errorData = { temp: '-99', hum: '-99' };
+    const errorData = { temp: '0', hum: '0' };
     
     cache[targetUrl] = errorData;
     cacheTimestamps[targetUrl] = Date.now();

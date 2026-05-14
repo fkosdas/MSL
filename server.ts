@@ -455,7 +455,7 @@ async function startServer() {
       res.json(data);
     } catch (error: any) {
       console.error('[Proxy] Error scraping cabinet data:', error.message);
-      res.json({ temp: '-99', hum: '-99' });
+      res.json({ temp: '0', hum: '0' });
     }
   });
 
