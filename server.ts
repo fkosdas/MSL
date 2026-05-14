@@ -166,6 +166,7 @@ async function startServer() {
                  m.durum = 'EXPIRED';
                  updatedCount++;
                  
+                 const limitHours = m.mslSeviyesi ? (mslEngine.getLimitHours(m.mslSeviyesi) || 'Bilinmiyor') : 'Bilinmiyor';
                  const log = {
                     id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
                     date: new Date(now).toISOString(),
@@ -174,7 +175,7 @@ async function startServer() {
                     islemTipi: 'Süre Aşımı',
                     eskiDeger: 'OPENED',
                     yeniDeger: 'EXPIRED',
-                    detay: 'Malzeme kullanım ömrü (Floor Life) doldu ve süresi aşıldı.'
+                    detay: `Malzeme kullanım ömrü doldu (MSL ${m.mslSeviyesi || 'Tanımsız'} - Limit: ${limitHours} Saat). Ürün süresi aşıldı.`
                  };
                  historyLogs.push(log);
                  await appendLogToArchive(log);

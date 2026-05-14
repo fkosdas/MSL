@@ -67,6 +67,7 @@ export const HistoryPanel: React.FC = () => {
 
   // Compute unique action types for the filter dropdown based on active tab
   const actionTypes = Array.from(new Set(logs.filter(log => {
+      if (log.islemTipi === 'SENSÖR_GÜNCELLEME') return false;
       const isLehim = isSolderPaste(log.stokAdi);
       if (activeSubTab === 'MALZEME' && isLehim) return false;
       if (activeSubTab === 'LEHIM' && !isLehim) return false;
