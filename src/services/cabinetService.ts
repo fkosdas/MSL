@@ -24,22 +24,36 @@ export const createCabinetService = (socket: Socket, state: { cabinetConfigs: Ca
       };
 
       const results: Record<string, { temp: number, hum: number }> = {};
-      const entries = Object.entries(urls);
+      const cleanVal = (val: string | undefined) => {
+        if (!val || val === 'N/A') return 0;
+        const num = parseFloat(val.replace(/[^0-9.-]/g, ''));
+        return isNaN(num) ? 0 : num;
+      };
 
-      for (let i = 0; i < entries.length; i++) {
-        const [id, url] = entries[i];
-        try {
-          const data = await fetchCabinetData(url);
-          const cleanVal = (val: string) => {
-            if (!val || val === 'N/A') return 0;
-            const num = parseFloat(val.replace(/[^0-9.-]/g, ''));
-            return isNaN(num) ? 0 : num;
-          };
-          results[id] = { temp: cleanVal(data.temp), hum: cleanVal(data.hum) };
-        } catch (error) {
-          results[id] = { temp: 0, hum: 0 };
+      try {
+        const cacheResponse = await fetch('/api/sensors/cache');
+        if (cacheResponse.ok) {
+          const cacheData = await cacheResponse.json();
+          
+          const entries = Object.entries(urls);
+          for (const [id, url] of entries) {
+            if (cacheData[url]) {
+              results[id] = { temp: cleanVal(cacheData[url].temp), hum: cleanVal(cacheData[url].hum) };
+            } else {
+              // Hızlı olsun diye asenkron tetikle
+              fetchCabinetData(url).catch(console.error);
+              results[id] = { temp: 0, hum: 0 };
+            }
+          }
+          return results;
         }
-        if (i < entries.length - 1) await new Promise(resolve => setTimeout(resolve, 1000));
+      } catch (e) {
+        console.error('Sensor cache error:', e);
+      }
+      
+      // Fallback
+      for (const id of Object.keys(urls)) {
+         results[id] = { temp: 0, hum: 0 };
       }
       return results;
     },

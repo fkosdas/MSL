@@ -217,7 +217,7 @@ export const SensorCharts: React.FC<{ logs: HistoryLog[] }> = ({ logs }) => {
                    </div>
                    
                    <div className="bg-card border border-border-strong rounded-3xl p-6 shadow-xl h-[350px]">
-                     <ResponsiveContainer width="100%" height="100%">
+                     <ResponsiveContainer width="100%" height="100%" minHeight={350}>
                        <LineChart data={locData} margin={{ top: 20, right: 30, left: 10, bottom: 20 }}>
                          <CartesianGrid strokeDasharray="3 3" stroke="#2D3748" vertical={false} opacity={0.3} />
                          <XAxis 

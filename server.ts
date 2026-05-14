@@ -7,7 +7,7 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { scrapeCabinetData } from './backend-services/cabinetScraper';
+import { scrapeCabinetData, getCachedSensors } from './backend-services/cabinetScraper';
 import { connectToNetsis, fetchNetsisMslData, searchNetsisMslData } from './backend-services/netsisDb';
 import { Malzeme, SolderPaste, CabinetConfig, NetsisConfig, NetsisMalzeme } from './src/types';
 import { mslEngine } from './src/mslEngine';
@@ -61,15 +61,11 @@ async function startServer() {
       const dateTarget = new Date(log.date || Date.now());
       const year = dateTarget.getFullYear();
       const month = String(dateTarget.getMonth() + 1).padStart(2, '0');
-      const archiveFile = path.join(ARCHIVE_DIR, `history_${year}_${month}.json`);
+      // Arşiv formatı satır bazlı olacağı için uzantıyı .ndjson yapıyoruz
+      const archiveFile = path.join(ARCHIVE_DIR, `history_${year}_${month}.ndjson`);
       
-      let archiveData: any[] = [];
-      if (fs.existsSync(archiveFile)) {
-        const fileContent = await fs.promises.readFile(archiveFile, 'utf-8');
-        archiveData = JSON.parse(fileContent);
-      }
-      archiveData.push(log);
-      await safeWriteJson(archiveFile, archiveData);
+      // Dosyayı belleğe okumadan doğrudan sonuna yeni bir satır olarak ekler
+      await fs.promises.appendFile(archiveFile, JSON.stringify(log) + '\n', 'utf-8');
     } catch (e) {
       console.error('Error appending log to archive:', e);
     }
@@ -433,6 +429,10 @@ async function startServer() {
     res.json([]);
   });
 
+  app.get('/api/sensors/cache', (req, res) => {
+    res.json(getCachedSensors());
+  });
+
   app.get('/api/proxy-cabinet', async (req, res) => {
     const targetUrl = req.query.url as string;
     if (!targetUrl) return res.status(400).send('URL required');
@@ -525,25 +525,21 @@ async function startServer() {
 
     socket.on('update-malzeme', (updated: Malzeme) => {
       malzemeler[updated.barkod] = updated;
-      saveTrackingData();
       io.emit('malzeme-updated', updated);
     });
 
     socket.on('delete-malzeme', (barkod: string) => {
       delete malzemeler[barkod];
-      saveTrackingData();
       io.emit('malzeme-deleted', barkod);
     });
 
     socket.on('update-solder-paste', (updated: SolderPaste) => {
       solderPastes[updated.barkod] = updated;
-      saveTrackingData();
       io.emit('solder-paste-updated', updated);
     });
 
     socket.on('delete-solder-paste', (barkod: string) => {
       delete solderPastes[barkod];
-      saveTrackingData();
       io.emit('solder-paste-deleted', barkod);
     });
 
