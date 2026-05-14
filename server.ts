@@ -446,12 +446,21 @@ async function startServer() {
   app.get('/api/proxy-cabinet', async (req, res) => {
     const targetUrl = req.query.url as string;
     if (!targetUrl) return res.status(400).send('URL required');
+
+    // İzin verilen IP listesi (Whitelist)
+    const allowedIps = ['192.168.2.229', '192.168.2.21', '192.168.2.116'];
+    const isAllowed = allowedIps.some(ip => targetUrl.startsWith(`http://${ip}`));
+
+    if (!isAllowed) {
+      return res.status(403).json({ error: 'SSRF Protection: Target URL is not allowed.' });
+    }
+
     try {
       const data = await scrapeCabinetData(targetUrl);
       res.json(data);
     } catch (error: any) {
       console.error('[Proxy] Error scraping cabinet data:', error.message);
-      res.json({ temp: 0, hum: 0 });
+      res.json({ temp: '-99', hum: '-99' });
     }
   });
 
