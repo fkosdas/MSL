@@ -1,0 +1,6 @@
+{
+  "name": "MSL Takip Sistemi",
+  "description": "JEDEC J-STD-033 standartlarına uygun, Socket.io ile LAN üzerinden anlık veri senkronizasyonu sağlayan MSL ve Krem Lehim Takip Sistemi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

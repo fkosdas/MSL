@@ -1,0 +1,29 @@
+{
+  "malzemeler": {
+    "LOT-2000": {
+      "id": "netsis-LOT-2000",
+      "barkod": "LOT-2000",
+      "parcaNo": "PN-100",
+      "description": "COMPONENT TYPE 0 - 0",
+      "mslSeviyesi": "2a",
+      "kalinlik": 2.45,
+      "sealDate": "2026-05-13T10:16:27.758Z",
+      "durum": "BAKING",
+      "location": "OVEN_1",
+      "acilisZamani": null,
+      "sonFirinlamaZamani": null,
+      "kullanilanZamanMs": 0,
+      "SERILOTNO": "LOT-2000",
+      "STOK_KODU": "PN-100",
+      "STOK_ADI": "COMPONENT TYPE 0 - 0",
+      "MSL": "1",
+      "THICKNESS": 2.45,
+      "bakingTemp": 60,
+      "row": 1,
+      "col": 3,
+      "firinlamaBaslangicZamani": "2026-05-13T10:17:33.684Z",
+      "firinlamaBitisZamani": "2026-06-12T10:17:33.684Z"
+    }
+  },
+  "solderPastes": {}
+}

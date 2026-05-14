@@ -1,0 +1,49 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* DARK MODE (Varsayılan) */
+  :root, .dark-mode {
+    --bg-color: 15 23 42; /* #0f172a */
+    --bg-card: 30 41 59; /* #1e293b */
+    --bg-surface: 51 65 85; /* #334155 */
+    --bg-surface-hover: 71 85 105; /* #475569 */
+    
+    --text-color: 248 250 252; /* #f8fafc */
+    --text-muted: 203 213 225; /* #cbd5e1 */
+    --text-dim: 148 163 184; /* #94a3b8 */
+    --text-inverse: 15 23 42; /* #0f172a */
+    
+    --border-color: 30 41 59; /* #1e293b */
+    --border-strong: 51 65 85; /* #334155 */
+  }
+
+  /* AYDINLIK MOD */
+  .light-mode {
+    --bg-color: 248 250 252; /* #f8fafc */
+    --bg-card: 255 255 255; /* #ffffff */
+    --bg-surface: 241 245 249; /* #f1f5f9 */
+    --bg-surface-hover: 226 232 240; /* #e2e8f0 */
+    
+    --text-color: 15 23 42; /* #0f172a */
+    --text-muted: 51 65 85; /* #334155 */
+    --text-dim: 71 85 105; /* #475569 */
+    --text-inverse: 248 250 252; /* #f8fafc */
+    
+    --border-color: 226 232 240; /* #e2e8f0 */
+    --border-strong: 203 213 225; /* #cbd5e1 */
+  }
+
+  body {
+    background-color: rgb(var(--bg-color));
+    color: rgb(var(--text-color));
+    @apply antialiased transition-colors duration-300;
+  }
+}
+
+.markdown-body {
+  color: var(--text-color);
+  @apply leading-relaxed;
+}
